@@ -120,6 +120,8 @@ logical :: no_sw_cloud_heating_at_levs = .false. ! mtp: Turns of shortwave cloud
 integer :: no_heating_min_sw = 1        ! level=1 for top layer         
 integer :: no_heating_max_sw = 1        ! level=32/48 for bottom layer (in 32/48 layer model) 
 
+
+ 
 namelist / shortwave_driver_nml /    do_cmip_diagnostics, &
 !                                    calculate_volcanic_sw_heating, &
                                      swform, &
@@ -131,7 +133,7 @@ namelist / shortwave_driver_nml /    do_cmip_diagnostics, &
                                      no_heating_min_sw, &
                                      no_heating_max_sw, &
                                      clear_min_sw, &
-                                     clear_max_sw 
+                                     clear_max_sw  
                                      
 
 !---------------------------------------------------------------------
@@ -427,7 +429,8 @@ subroutine shortwave_driver (press, pflux, temp, rh2o, &
                              asfc_vis_dif, asfc_nir_dif, Astro,   &
                              aeroasymfac, aerosctopdep, aeroextopdep,       &
                              Rad_gases, camtsw, cldsct, cldext, cldasymm,   &
-                             flag_stoch, Rad_control, do_swaerosol, Sw_output )
+                             flag_stoch, Rad_control, do_swaerosol, Sw_output, &
+                             local_sw_heating ) ! 071820[ZS]
 
 !---------------------------------------------------------------------
 !    shortwave_driver initializes shortwave radiation output variables, 
@@ -448,6 +451,8 @@ integer,                         intent(in)    :: flag_stoch
 type(radiation_control_type),    intent(in)    :: Rad_control
 logical,                         intent(in)    :: do_swaerosol
 type(sw_output_type), dimension(:), intent(inout) :: Sw_output
+! 071820[ZS]
+real, dimension(:,:,:),          intent(in)    :: local_sw_heating
 
 !--------------------------------------------------------------------
 !  intent(in) variables:
@@ -642,6 +647,13 @@ type(sw_output_type), dimension(:), intent(inout) :: Sw_output
             !  Sw_output%hsw(:,:,no_heating_min_sw:no_heating_max_sw) = 0.
             Sw_output(indx)%hsw(:,:,no_heating_min_sw:no_heating_max_sw) = Sw_output(indx)%hswcf(:,:,no_heating_min_sw:no_heating_max_sw)
             end if
+
+            !++ 071820[ZS]
+            if (Rad_control%add_regional_sw_heating) then
+               Sw_output(indx)%hsw(:,:,:) = Sw_output(indx)%hsw(:,:,:) + local_sw_heating(:,:,:)
+               Sw_output(indx)%hswcf(:,:,:) = Sw_output(indx)%hswcf(:,:,:) + local_sw_heating(:,:,:)
+            endif
+            !-- 071820[ZS] 
 
           enddo  ! indx
 !--------------------------------------------------------------------------------

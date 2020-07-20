@@ -63,7 +63,8 @@ use time_manager_mod,      only: time_type, set_date, set_time,  &
 use sat_vapor_pres_mod,    only: sat_vapor_pres_init, compute_qs
 use constants_mod,         only: constants_init, RDGAS, RVGAS,   &
                                  STEFAN, GRAV, SECONDS_PER_DAY,  &
-                                 RADIAN, diffac
+                                 RADIAN, diffac, &
+                                 PI ! 071820[ZS]
 use data_override_mod,     only: data_override
 
 use field_manager_mod,     only: MODEL_ATMOS
@@ -354,6 +355,7 @@ logical :: do_conserve_energy = .false.
 ! 071720[ZS] namelist for adding regional shortwave heating
 logical :: add_regional_sw_heating = .false.
 real :: sw_heating_magnitude = 0.0
+integer :: sw_heating_level = 1
 real, dimension(4) :: sw_heating_region = (/ 0.0,0.0,0.0,0.0 /)
 
 ! <NAMELIST NAME="radiation_driver_nml">
@@ -1224,7 +1226,7 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
     !call rad_output_init (Rad_output)
    endif ! (using_restart_file)
 
-! 071820[ZS] prescribe regional shortwave heating 
+!++ 071820[ZS] prescribe regional shortwave heating 
    allocate (global_sw_heating(id,jd,kmax))
    allocate (lon(id,jd))
    allocate (lat(id,jd))
@@ -1235,20 +1237,20 @@ type(radiation_flux_type),   intent(inout) :: Rad_flux(:)
       lat(:,j) = 0.5*(latb(:,j)+latb(:,j+1))
    enddo
    Rad_control%add_regional_sw_heating = add_regional_sw_heating
-   if add_regional_sw_heating then
+   global_sw_heating(:,:,:) = 0.0
+   if (add_regional_sw_heating) then
       do i=1,size(lon,1)
          do j=1,size(lon,2)
-            if (lat(i,j)>=sw_heating_region(1) .and. &
-               lat(i,j)<sw_heating_region(2) .and. &
-               lon(i,j)>=sw_heating_region(3) .and. &
-               lon(i,j)<sw_heating_region(4) ) then
+            if ( lat(i,j)>=sw_heating_region(1)/180.0*PI .and. &
+               lat(i,j)<sw_heating_region(2)/180.0*PI .and. &
+               lon(i,j)>=sw_heating_region(3)/180.0*PI .and. &
+               lon(i,j)<sw_heating_region(4)/180.0*PI ) then
                global_sw_heating(i,j,sw_heating_level) = sw_heating_magnitude
             endif
          enddo
       enddo
-   else
-      global_sw_heating(:,:,:) = 0.0
    endif
+!-- 071820[ZS]
 
 !--------------------------------------------------------------------
 !    do the initialization for the radiation package.
@@ -1858,13 +1860,13 @@ real, dimension(size(Radiation_input_block%t,1), &
                 Cldrad_control%num_sw_cloud_bands, &
                 num_sw_ica_profiles) :: cldsctsw, cldextsw, cldasymmsw
 
+! 071820[ZS]: add shortwave heating
+real, dimension(ie-is+1,je-js+1,size(global_sw_heating,3))    :: local_sw_heating
+
 ! local pointers for input data
 real, dimension(:),       pointer :: gavg_rrv
 real, dimension(:,:,:),   pointer :: t, p_full, p_half, z_full, z_half, q
 real, dimension(:,:,:,:), pointer :: r, rm
-
-! 050518[ZS]: add shortwave heating
-real, dimension(ie-is+1,je-js+1,npz)    :: local_sw_heating
                 
 !-------------------------------------------------------------------
 !   local variables:
@@ -2063,6 +2065,8 @@ real, dimension(ie-is+1,je-js+1,npz)    :: local_sw_heating
 !    tive fluxes and heating rates.
 !---------------------------------------------------------------------
       call mpp_clock_begin (calc_clock)
+      ! 071820[ZS] assign value to local shortwave heating
+      local_sw_heating(:,:,:) = global_sw_heating(is:ie,js:je,:)
       if (do_rad) then
         call radiation_calc (is, ie, js, je, lat, lon, &
                              Atmos_input%press, Atmos_input%pflux,  &
@@ -2076,7 +2080,8 @@ real, dimension(ie-is+1,je-js+1,npz)    :: local_sw_heating
                              aeroasymfac, aerosctopdep, aeroextopdep, &
                              crndlw, cmxolw, emrndlw, emmxolw, &
                              camtsw, cldsctsw, cldextsw, cldasymmsw, &
-                             Rad_output, Lw_output, Sw_output, Lw_diagnostics)
+                             Rad_output, Lw_output, Sw_output, Lw_diagnostics, &
+                             local_sw_heating) ! 071920[ZS]
       endif
       call mpp_clock_end (calc_clock)
 
@@ -4185,7 +4190,8 @@ subroutine radiation_calc (is, ie, js, je, lat, lon, &
                            aeroasymfac, aerosctopdep, aeroextopdep, &
                            crndlw, cmxolw, emrndlw, emmxolw, &
                            camtsw, cldsct, cldext, cldasymm, &
-                           Rad_output, Lw_output, Sw_output, Lw_diagnostics)
+                           Rad_output, Lw_output, Sw_output, Lw_diagnostics, &
+                           local_sw_heating) ! 071920[ZS]
 
 !--------------------------------------------------------------------
 !    radiation_calc is called on radiation timesteps and calculates
@@ -4220,6 +4226,7 @@ type(rad_output_type),         intent(inout)         :: Rad_output
 type(lw_output_type), dimension(:), intent(inout)    :: Lw_output
 type(sw_output_type), dimension(:), intent(inout)    :: Sw_output
 type(lw_diagnostics_type),          intent(inout)    :: Lw_diagnostics
+real, dimension(:,:,:),       intent(in)             :: local_sw_heating ! 071920[ZS]
 
 !-----------------------------------------------------------------------
 !    intent(in) variables:
@@ -4280,8 +4287,6 @@ type(lw_diagnostics_type),          intent(inout)    :: Lw_diagnostics
 !----------------------------------------------------------------------
 
       integer :: kmax
-      ! 071820[ZS] assign value to local shortwave heating
-      local_sw_heating(:,:,:) = global_sw_heating(is:ie,js:je,:)
 
 !----------------------------------------------------------------------
 !    compute longwave radiation
